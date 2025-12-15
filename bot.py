@@ -276,8 +276,7 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, listener))
 
     print("Bot starting...")
-    app.run_polling()
-
+    app.run_polling(drop_pending_updates=True)
 # ---------------- DEPLOY ----------------
 # 1. Creezi botul cu BotFather si iei token-ul
 # 2. Setezi variabilele de mediu: BOT_TOKEN, GROUP_ID, WEATHER_API_KEY, OPENAI_API_KEY
