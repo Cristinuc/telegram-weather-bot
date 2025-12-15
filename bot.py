@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Telegram Private Group Bot - Compatible with python-telegram-bot v13.x"""
+"""Telegram Private Group Bot - Compatible with python-telegram-bot v20.x"""
 
 import os
 import re
-import time
 import logging
 from datetime import datetime, timedelta
 from collections import Counter
 
 import requests
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -45,17 +44,17 @@ def clean_text(text: str) -> str:
     return text.lower()
 
 # Command handlers
-def start(update: Update, context: CallbackContext):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != GROUP_ID:
         return
-    update.message.reply_text("Bot activ. Răspund doar la comenzi. Fără improvizații.")
+    await update.message.reply_text("Bot activ. Răspund doar la comenzi. Fără improvizații.")
 
-def weather(update: Update, context: CallbackContext):
+async def weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != GROUP_ID:
         return
     
     if not context.args:
-        update.message.reply_text("Folosire: /weather <oras>")
+        await update.message.reply_text("Folosire: /weather <oras>")
         return
     
     city = " ".join(context.args)
@@ -68,19 +67,19 @@ def weather(update: Update, context: CallbackContext):
         if response.status_code == 200:
             temp = data["main"]["temp"]
             desc = data["weather"][0]["description"]
-            update.message.reply_text(f"Vremea în {city}: {temp}°C, {desc}")
+            await update.message.reply_text(f"Vremea în {city}: {temp}°C, {desc}")
         else:
-            update.message.reply_text(f"Oraș negăsit: {city}")
+            await update.message.reply_text(f"Oraș negăsit: {city}")
     except Exception as e:
         logger.error(f"Weather API error: {e}")
-        update.message.reply_text("Eroare la obținerea vremii.")
+        await update.message.reply_text("Eroare la obținerea vremii.")
 
-def summary(update: Update, context: CallbackContext):
+async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != GROUP_ID:
         return
     
     if not MESSAGES:
-        update.message.reply_text("Niciun mesaj înregistrat încă.")
+        await update.message.reply_text("Niciun mesaj înregistrat încă.")
         return
     
     if not context.args:
@@ -101,14 +100,14 @@ def summary(update: Update, context: CallbackContext):
     common = Counter(words).most_common(5)
     top_words = ", ".join([f"{w} ({c})" for w, c in common])
     
-    update.message.reply_text(f"Sumar {limit} mesaje:\nCuvinte frecvente: {top_words}")
+    await update.message.reply_text(f"Sumar {limit} mesaje:\nCuvinte frecvente: {top_words}")
 
-def mood(update: Update, context: CallbackContext):
+async def mood(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != GROUP_ID:
         return
     
     if not MESSAGES:
-        update.message.reply_text("Niciun mesaj pentru analiză.")
+        await update.message.reply_text("Niciun mesaj pentru analiză.")
         return
     
     recent = " ".join([m["text"] for m in MESSAGES[-10:]])
@@ -116,27 +115,27 @@ def mood(update: Update, context: CallbackContext):
     negative = len(re.findall(r"\b(rău|prost|nasol|urat)\b", recent, re.I))
     
     if positive > negative:
-        update.message.reply_text("Mood: Pozitiv 😊")
+        await update.message.reply_text("Mood: Pozitiv 😊")
     elif negative > positive:
-        update.message.reply_text("Mood: Negativ 😞")
+        await update.message.reply_text("Mood: Negativ 😞")
     else:
-        update.message.reply_text("Mood: Neutru 😐")
+        await update.message.reply_text("Mood: Neutru 😐")
 
-def ping(update: Update, context: CallbackContext):
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != GROUP_ID:
         return
-    update.message.reply_text("Pong! 🏓")
+    await update.message.reply_text("Pong! 🏓")
 
-def gpt(update: Update, context: CallbackContext):
+async def gpt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != GROUP_ID:
         return
     
     if not OPENAI_API_KEY:
-        update.message.reply_text("OpenAI API key nu este configurat.")
+        await update.message.reply_text("OpenAI API key nu este configurat.")
         return
     
     if not context.args:
-        update.message.reply_text("Folosire: /gpt <întrebare>")
+        await update.message.reply_text("Folosire: /gpt <întrebare>")
         return
     
     question = " ".join(context.args)
@@ -157,16 +156,16 @@ def gpt(update: Update, context: CallbackContext):
         
         if response.status_code == 200:
             answer = response.json()["choices"][0]["message"]["content"]
-            update.message.reply_text(answer)
+            await update.message.reply_text(answer)
         else:
             logger.error(f"OpenAI API error: {response.status_code} - {response.text}")
-            update.message.reply_text(f"Eroare GPT: {response.status_code}")
+            await update.message.reply_text(f"Eroare GPT: {response.status_code}")
     except Exception as e:
         logger.error(f"GPT request failed: {e}")
-        update.message.reply_text("Eroare la conectarea cu GPT.")
+        await update.message.reply_text("Eroare la conectarea cu GPT.")
 
 # Message handler
-def handle_message(update: Update, context: CallbackContext):
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != GROUP_ID:
         return
     
@@ -191,27 +190,25 @@ def handle_message(update: Update, context: CallbackContext):
         if re.search(trigger, text_lower):
             lang = detect_lang(msg.text)
             joke = JOKES_RO[hash(msg.text) % len(JOKES_RO)] if lang == "ro" else JOKES_EN[hash(msg.text) % len(JOKES_EN)]
-            msg.reply_text(joke)
+            await msg.reply_text(joke)
             break
 
 # Main
 def main():
-    updater = Updater(token=BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
+    application = Application.builder().token(BOT_TOKEN).build()
     
     # Register handlers
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("weather", weather))
-    dp.add_handler(CommandHandler("summary", summary))
-    dp.add_handler(CommandHandler("mood", mood))
-    dp.add_handler(CommandHandler("ping", ping))
-    dp.add_handler(CommandHandler("gpt", gpt))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("weather", weather))
+    application.add_handler(CommandHandler("summary", summary))
+    application.add_handler(CommandHandler("mood", mood))
+    application.add_handler(CommandHandler("ping", ping))
+    application.add_handler(CommandHandler("gpt", gpt))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     # Start bot
     logger.info("Bot starting...")
-    updater.start_polling()
-    updater.idle()
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
