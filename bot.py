@@ -1,214 +1,166 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""Telegram Private Group Bot - Compatible with python-telegram-bot v20.x"""
-
 import os
-import re
 import logging
-from datetime import datetime, timedelta
-from collections import Counter
-
 import requests
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# Configurare logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
-# Config
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-GROUP_ID = int(os.getenv("GROUP_ID", "0"))
-WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Încărcare variabile de mediu
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
+PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
 
-# Constants
-WEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
-GPT_MODEL = "gpt-4o-mini"
 
-# In-memory storage
-MESSAGES = []
-
-# Joke triggers and responses
-JOKE_TRIGGERS = [r"\bpula\b", r"\bpizda\b", r"\bcoaie\b", r"\bmuie\b"]
-JOKES_RO = ["Am notat. Nu ajută cu nimic.", "Informație procesată. Demisteaza mu.", "Mesaj recepționat. Inteligenta rămâne optională."]
-JOKES_EN = ["Message received. Wisdom not detected.", "Logged. Improvement pending.", "Acknowledged. Moving on."]
-
-# Utility functions
-def detect_lang(text: str) -> str:
-    return "ro" if any(c in "ăâîșț" for c in text.lower()) else "en"
-
-def clean_text(text: str) -> str:
-    text = re.sub(r"https?\S+", "", text)
-    text = re.sub(r"[^a-zA-ZăâîșțĂÂÎȘȚ ]", " ", text)
-    return text.lower()
-
-# Command handlers
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != GROUP_ID:
-        return
-    await update.message.reply_text("Bot activ. Răspund doar la comenzi. Fără improvizații.")
-
-async def weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != GROUP_ID:
-        return
+def get_weather(city: str) -> dict:
+    """Obține datele meteo de la OpenWeather API."""
+    url = "https://api.openweathermap.org/data/2.5/weather"
+    params = {
+        "q": city,
+        "appid": OPENWEATHER_API_KEY,
+        "units": "metric",
+        "lang": "ro"
+    }
     
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Eroare la obținerea datelor meteo: {e}")
+        raise
+
+
+def summarize_with_perplexity(text: str) -> str:
+    """Generează un rezumat folosind Perplexity API."""
+    url = "https://api.perplexity.ai/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": "sonar",
+        "messages": [
+            {
+                "role": "user",
+                "content": f"Rezumă pe scurt, în română, această descriere meteo pentru un utilizator de Telegram (maxim 2-3 propoziții):\n\n{text}"
+            }
+        ],
+        "max_tokens": 150,
+        "temperature": 0.7
+    }
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=20)
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Eroare la apelul Perplexity API: {e}")
+        raise
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler pentru comanda /start."""
+    welcome_message = (
+        "Bun venit! 👋\n\n"
+        "Sunt un bot meteo inteligent. Folosește comanda:\n"
+        "/meteo <oraș> - pentru a obține informații despre vreme\n\n"
+        "Exemplu: /meteo București"
+    )
+    await update.message.reply_text(welcome_message)
+
+
+async def meteo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler pentru comanda /meteo."""
     if not context.args:
-        await update.message.reply_text("Folosire: /weather <oras>")
+        await update.message.reply_text(
+            "Te rog specifică un oraș.\n"
+            "Exemplu: /meteo Cluj-Napoca"
+        )
         return
     
     city = " ".join(context.args)
-    params = {"q": city, "appid": WEATHER_API_KEY, "units": "metric", "lang": "ro"}
     
     try:
-        response = requests.get(WEATHER_URL, params=params, timeout=10)
-        data = response.json()
+        # Trimite mesaj de așteptare
+        status_message = await update.message.reply_text("🔍 Caut informații meteo...")
         
-        if response.status_code == 200:
-            temp = data["main"]["temp"]
-            desc = data["weather"][0]["description"]
-            await update.message.reply_text(f"Vremea în {city}: {temp}°C, {desc}")
+        # Obține datele meteo
+        weather_data = get_weather(city)
+        
+        # Extrage informațiile relevante
+        temp = weather_data["main"]["temp"]
+        feels_like = weather_data["main"]["feels_like"]
+        humidity = weather_data["main"]["humidity"]
+        description = weather_data["weather"][0]["description"]
+        wind_speed = weather_data["wind"]["speed"]
+        
+        # Creează textul de bază
+        base_text = (
+            f"Vremea în {city}:\n"
+            f"🌡️ Temperatură: {temp}°C (se simte ca {feels_like}°C)\n"
+            f"☁️ Condiții: {description}\n"
+            f"💨 Vânt: {wind_speed} m/s\n"
+            f"💧 Umiditate: {humidity}%"
+        )
+        
+        # Actualizează mesajul
+        await status_message.edit_text("🤖 Generez rezumat inteligent...")
+        
+        # Generează rezumat cu Perplexity
+        summary = summarize_with_perplexity(base_text)
+        
+        # Trimite răspunsul final
+        final_message = f"{base_text}\n\n📝 Rezumat:\n{summary}"
+        await status_message.edit_text(final_message)
+        
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 404:
+            await update.message.reply_text(
+                f"❌ Orașul '{city}' nu a fost găsit.\n"
+                "Verifică numele și încearcă din nou."
+            )
         else:
-            await update.message.reply_text(f"Oraș negăsit: {city}")
+            await update.message.reply_text(
+                "❌ A apărut o eroare la obținerea datelor meteo.\n"
+                "Te rog încearcă din nou mai târziu."
+            )
+        logger.error(f"HTTP Error: {e}")
     except Exception as e:
-        logger.error(f"Weather API error: {e}")
-        await update.message.reply_text("Eroare la obținerea vremii.")
+        await update.message.reply_text(
+            "❌ A apărut o eroare neașteptată.\n"
+            "Te rog încearcă din nou."
+        )
+        logger.exception(f"Eroare neașteptată: {e}")
 
-async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != GROUP_ID:
-        return
-    
-    if not MESSAGES:
-        await update.message.reply_text("Niciun mesaj înregistrat încă.")
-        return
-    
-    if not context.args:
-        limit = 20
-    else:
-        try:
-            limit = int(context.args[0])
-        except:
-            cutoff = datetime.now() - timedelta(hours=int(context.args[0].replace("ore", "")))
-            recent = [m for m in MESSAGES if m["time"] > cutoff]
-            limit = len(recent)
-    
-    recent_msgs = MESSAGES[-limit:]
-    words = []
-    for msg in recent_msgs:
-        words.extend(clean_text(msg["text"]).split())
-    
-    common = Counter(words).most_common(5)
-    top_words = ", ".join([f"{w} ({c})" for w, c in common])
-    
-    await update.message.reply_text(f"Sumar {limit} mesaje:\nCuvinte frecvente: {top_words}")
 
-async def mood(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != GROUP_ID:
-        return
-    
-    if not MESSAGES:
-        await update.message.reply_text("Niciun mesaj pentru analiză.")
-        return
-    
-    recent = " ".join([m["text"] for m in MESSAGES[-10:]])
-    positive = len(re.findall(r"\b(bun|super|wow|tare|cool)\b", recent, re.I))
-    negative = len(re.findall(r"\b(rău|prost|nasol|urat)\b", recent, re.I))
-    
-    if positive > negative:
-        await update.message.reply_text("Mood: Pozitiv 😊")
-    elif negative > positive:
-        await update.message.reply_text("Mood: Negativ 😞")
-    else:
-        await update.message.reply_text("Mood: Neutru 😐")
-
-async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != GROUP_ID:
-        return
-    await update.message.reply_text("Pong! 🏓")
-
-async def gpt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != GROUP_ID:
-        return
-    
-    if not OPENAI_API_KEY:
-        await update.message.reply_text("OpenAI API key nu este configurat.")
-        return
-    
-    if not context.args:
-        await update.message.reply_text("Folosire: /gpt <întrebare>")
-        return
-    
-    question = " ".join(context.args)
-    
-    try:
-        headers = {
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": GPT_MODEL,
-            "messages": [{"role": "user", "content": question}],
-            "max_tokens": 500
-        }
-        
-        response = requests.post("https://api.openai.com/v1/chat/completions", 
-                               headers=headers, json=payload, timeout=30)
-        
-        if response.status_code == 200:
-            answer = response.json()["choices"][0]["message"]["content"]
-            await update.message.reply_text(answer)
-        else:
-            logger.error(f"OpenAI API error: {response.status_code} - {response.text}")
-            await update.message.reply_text(f"Eroare GPT: {response.status_code}")
-    except Exception as e:
-        logger.error(f"GPT request failed: {e}")
-        await update.message.reply_text("Eroare la conectarea cu GPT.")
-
-# Message handler
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != GROUP_ID:
-        return
-    
-    msg = update.message
-    if not msg or not msg.text:
-        return
-    
-    # Store message
-    MESSAGES.append({
-        "text": msg.text,
-        "user": msg.from_user.first_name,
-        "time": datetime.now()
-    })
-    
-    # Keep only last 1000 messages
-    if len(MESSAGES) > 1000:
-        MESSAGES.pop(0)
-    
-    # Joke trigger
-    text_lower = msg.text.lower()
-    for trigger in JOKE_TRIGGERS:
-        if re.search(trigger, text_lower):
-            lang = detect_lang(msg.text)
-            joke = JOKES_RO[hash(msg.text) % len(JOKES_RO)] if lang == "ro" else JOKES_EN[hash(msg.text) % len(JOKES_EN)]
-            await msg.reply_text(joke)
-            break
-
-# Main
 def main():
-    application = Application.builder().token(BOT_TOKEN).build()
+    """Funcția principală care pornește botul."""
+    # Verifică variabilele de mediu
+    if not TELEGRAM_BOT_TOKEN:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN nu este setat în variabilele de mediu")
+    if not OPENWEATHER_API_KEY:
+        raise RuntimeError("OPENWEATHER_API_KEY nu este setat în variabilele de mediu")
+    if not PERPLEXITY_API_KEY:
+        raise RuntimeError("PERPLEXITY_API_KEY nu este setat în variabilele de mediu")
     
-    # Register handlers
+    # Creează aplicația
+    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    # Adaugă handlere
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("weather", weather))
-    application.add_handler(CommandHandler("summary", summary))
-    application.add_handler(CommandHandler("mood", mood))
-    application.add_handler(CommandHandler("ping", ping))
-    application.add_handler(CommandHandler("gpt", gpt))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(CommandHandler("meteo", meteo))
     
-    # Start bot
-    logger.info("Bot starting...")
-    application.run_polling()
+    # Pornește botul
+    logger.info("Botul pornește...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
 
 if __name__ == "__main__":
     main()
