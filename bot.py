@@ -216,6 +216,7 @@ def main():
     # Adaugă handlere
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("meteo", meteo))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     # Pornește botul
     logger.info("Botul pornește...")
