@@ -2,7 +2,7 @@ import os
 import logging
 import requests
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandlApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 # Configurare logging
 logging.basicConfig(
@@ -140,6 +140,66 @@ async def meteo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception(f"Eroare neașteptată: {e}")
 
 
+
+# Lista de cuvinte trigger pentru glume picante
+SPICY_WORDS = ["pula", "pizda", "coaie", "muie", "tzatze", "tate", "cur", "pizdă", "pulă", "țâțe"]
+
+
+def contains_spicy_word(text: str) -> bool:
+    """Verifică dacă textul conține cuvinte picante."""
+    text_lower = text.lower()
+    return any(word in text_lower for word in SPICY_WORDS)
+
+
+def generate_spicy_joke() -> str:
+    """Generează o glumă picantă/sexy/ironică folosind Perplexity AI."""
+    url = "https://api.perplexity.ai/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": "sonar",
+        "messages": [
+            {
+                "role": "user",
+                "content": "Spune-mi o glumă scurtă în română, cu tentă sexy și ironică, în stilul comedianților stand-up. Fii creative, nu vulgară excesiv, dar picantă și amuzantă (maxim 2-3 propoziții)."
+            }
+        ],
+        "max_tokens": 200,
+        "temperature": 0.9
+    }
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=20)
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Eroare la generarea glumei: {e}")
+        return "😏 Hmm, mi-a scăpat gluma... dar poți încerca din nou!"
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler pentru mesaje text care detectează cuvinte picante."""
+    if not update.message or not update.message.text:
+        return
+    
+    message_text = update.message.text
+    
+    # Verifică dacă mesajul conține cuvinte picante
+    if contains_spicy_word(message_text):
+        # Trimite mesaj de așteptare
+        status_msg = await update.message.reply_text("😏 Hehe, văd că ești în formă... las' că am ceva pentru tine!")
+        
+        try:
+            # Generează glumă picantă
+            joke = generate_spicy_joke()
+            await status_msg.edit_text(f"🔥 {joke}")
+        except Exception as e:
+            logger.exception(f"Eroare la trimiterea glumei: {e}")
+            await status_msg.edit_text("😅 Ups, mi-a scăpat gluma... încearcă din nou!")
+
 def main():
     """Funcția principală care pornește botul."""
     # Verifică variabilele de mediu
@@ -156,6 +216,7 @@ def main():
     # Adaugă handlere
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("meteo", meteo))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     # Pornește botul
     logger.info("Botul pornește...")
