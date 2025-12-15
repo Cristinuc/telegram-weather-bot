@@ -8,8 +8,6 @@ import time
 import logging
 from datetime import datetime, timedelta
 from collections import Counter
-from threading import Thread
-from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import requests
 from telegram import Update
@@ -36,16 +34,6 @@ MESSAGES = []
 JOKE_TRIGGERS = [r"\bpula\b", r"\bpizda\b", r"\bcoaie\b", r"\bmuie\b"]
 JOKES_RO = ["Am notat. Nu ajută cu nimic.", "Informație procesată. Demnitatea nu.", "Mesaj recepționat. Inteligența rămâne opțională."]
 JOKES_EN = ["Message received. Wisdom not detected.", "Logged. Improvement pending.", "Acknowledged. Moving on."]
-
-# Health check server
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-        self.wfile.write(b'Bot is running')
-    def log_message(self, format, *args):
-        pass
 
 # Utility functions
 def detect_lang(text: str) -> str:
@@ -124,9 +112,11 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         since = now - timedelta(hours=12)
         msgs = [m for m in MESSAGES if m["time"] >= since]
+    
     if not msgs:
         await update.message.reply_text("Nu am ce rezuma.")
         return
+    
     words = []
     for m in msgs:
         words += clean_text(m["text"]).split()
@@ -145,10 +135,12 @@ async def mood(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def listener(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or update.effective_chat.id != GROUP_ID:
         return
+    
     text = update.message.text or ""
     MESSAGES.append({"text": text, "time": datetime.utcnow()})
     if len(MESSAGES) > 1000:
         MESSAGES.pop(0)
+    
     for pattern in JOKE_TRIGGERS:
         if re.search(pattern, text.lower()):
             lang = detect_lang(text)
@@ -157,15 +149,9 @@ async def listener(update: Update, context: ContextTypes.DEFAULT_TYPE):
             break
 
 def main():
-    # Start HTTP health check server
-    port = int(os.getenv("PORT", "10000"))
-    httpd = HTTPServer(('0.0.0.0', port), HealthHandler)
-    Thread(target=httpd.serve_forever, daemon=True).start()
-    logger.info(f"Health check server running on port {port}")
-
     # Build application
     app = Application.builder().token(BOT_TOKEN).build()
-
+    
     # Add handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
@@ -175,7 +161,7 @@ def main():
     app.add_handler(CommandHandler("summary", summary))
     app.add_handler(CommandHandler("mood", mood))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, listener))
-
+    
     # Run
     logger.info("Bot starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
