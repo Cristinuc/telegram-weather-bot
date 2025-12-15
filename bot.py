@@ -2,7 +2,7 @@ import os
 import logging
 import requests
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandlApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder,  CommandHandler, MessageHandler, ContextTypes, filters
 
 # Configurare logging
 logging.basicConfig(
