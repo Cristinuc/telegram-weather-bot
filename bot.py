@@ -1,6 +1,6 @@
 # Telegram Private Group Bot
 # Limbaj: Python
-# Functii: comenzi, trigger-e cu glume, vreme, analiza chat, rezumat
+# Functii: comenzi, trigger-e cu glume, vreme, analiza chat, rezumat, GPT
 # Raspunde doar la comenzi si la cuvinte cheie definite
 # RO / EN
 
@@ -9,6 +9,8 @@ import re
 import time
 from datetime import datetime, timedelta
 from collections import Counter
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
@@ -19,6 +21,9 @@ GROUP_ID = int(os.getenv("GROUP_ID", "0"))  # ID-ul grupului privat
 
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")  # OpenWeather
 WEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # OpenAI GPT
+GPT_MODEL = "gpt-4o-mini"
 
 LANG_DEFAULT = "ro"
 SUMMARY_MAX_MESSAGES = 300
@@ -47,6 +52,17 @@ JOKES = {
 
 # stocare mesaje in memorie
 MESSAGES = []
+
+# ---------------- HEALTH CHECK SERVER ----------------
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'Bot is running')
+    
+    def log_message(self, format, *args):
+        pass  # Suppress HTTP logs
 
 # ---------------- UTILS ----------------
 
@@ -80,8 +96,39 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/weather <oras>\\n"
         "/summary [ore] sau [nr mesaje]\\n"
         "/mood\\n"
+        "/gpt <intrebare>\\n"
         "/ping"
     )
+
+
+async def gpt_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != GROUP_ID:
+        return
+    
+    if not OPENAI_API_KEY:
+        await update.message.reply_text("GPT nu e configurat.")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Scrie ceva după /gpt.")
+        return
+
+    prompt = " ".join(context.args)
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY)
+
+        resp = client.chat.completions.create(
+            model=GPT_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=200,
+        )
+
+        text = resp.choices[0].message.content
+        await update.message.reply_text(text)
+    except Exception as e:
+        await update.message.reply_text(f"Eroare GPT: {str(e)[:100]}")
 
 
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -209,10 +256,18 @@ async def listener(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------- MAIN ----------------
 
 if __name__ == "__main__":
+    # Start HTTP health check server in background thread
+    port = int(os.getenv("PORT", "10000"))
+    httpd = HTTPServer(('0.0.0.0', port), HealthHandler)
+    Thread(target=httpd.serve_forever, daemon=True).start()
+    print(f"Health check server running on port {port}")
+
+    # Start Telegram bot
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("gpt", gpt_cmd))
     app.add_handler(CommandHandler("ping", ping))
     app.add_handler(CommandHandler("weather", weather))
     app.add_handler(CommandHandler("summary", summary))
@@ -220,10 +275,11 @@ if __name__ == "__main__":
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, listener))
 
+    print("Bot starting...")
     app.run_polling()
 
 # ---------------- DEPLOY ----------------
 # 1. Creezi botul cu BotFather si iei token-ul
-# 2. Setezi variabilele de mediu BOT_TOKEN, GROUP_ID, WEATHER_API_KEY
+# 2. Setezi variabilele de mediu: BOT_TOKEN, GROUP_ID, WEATHER_API_KEY, OPENAI_API_KEY
 # 3. python3 bot.py
-# 4. Pentru 24/7 foloseste un VPS sau Render cu restart automat
+# 4. Pentru 24/7 foloseste Render cu restart automat
