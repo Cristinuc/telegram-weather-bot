@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Telegram Private Group Bot - Compatible with python-telegram-bot v20.x"""
+"""Telegram Private Group Bot - Compatible with python-telegram-bot v13.x"""
 
 import os
 import re
@@ -11,7 +11,7 @@ from collections import Counter
 
 import requests
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
 # Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -32,7 +32,7 @@ MESSAGES = []
 
 # Joke triggers and responses
 JOKE_TRIGGERS = [r"\bpula\b", r"\bpizda\b", r"\bcoaie\b", r"\bmuie\b"]
-JOKES_RO = ["Am notat. Nu ajută cu nimic.", "Informație procesată. Demnitatea nu.", "Mesaj recepționat. Inteligența rămâne opțională."]
+JOKES_RO = ["Am notat. Nu ajută cu nimic.", "Informație procesată. Demisteaza mu.", "Mesaj recepționat. Inteligenta rămâne optională."]
 JOKES_EN = ["Message received. Wisdom not detected.", "Logged. Improvement pending.", "Acknowledged. Moving on."]
 
 # Utility functions
@@ -40,131 +40,178 @@ def detect_lang(text: str) -> str:
     return "ro" if any(c in "ăâîșț" for c in text.lower()) else "en"
 
 def clean_text(text: str) -> str:
-    text = re.sub(r"http\S+", "", text)
+    text = re.sub(r"https?\S+", "", text)
     text = re.sub(r"[^a-zA-ZăâîșțĂÂÎȘȚ ]", " ", text)
     return text.lower()
 
 # Command handlers
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def start(update: Update, context: CallbackContext):
     if update.effective_chat.id != GROUP_ID:
         return
-    await update.message.reply_text("Bot activ. Răspund doar la comenzi. Fără improvizații.")
+    update.message.reply_text("Bot activ. Răspund doar la comenzi. Fără improvizații.")
 
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def weather(update: Update, context: CallbackContext):
     if update.effective_chat.id != GROUP_ID:
         return
-    await update.message.reply_text("/weather <oras>\n/summary [ore|nr]\n/mood\n/gpt <intrebare>\n/ping")
-
-async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != GROUP_ID:
-        return
-    await update.message.reply_text("Sunt online. Din păcate.")
-
-async def weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != GROUP_ID:
-        return
+    
     if not context.args:
-        await update.message.reply_text("Specifică un oraș.")
+        update.message.reply_text("Folosire: /weather <oras>")
         return
+    
     city = " ".join(context.args)
+    params = {"q": city, "appid": WEATHER_API_KEY, "units": "metric", "lang": "ro"}
+    
     try:
-        r = requests.get(WEATHER_URL, params={"q": city, "appid": WEATHER_API_KEY, "units": "metric", "lang": "ro"}, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            await update.message.reply_text(f"{city}. {data['main']['temp']}°C. {data['weather'][0]['description']}.")
+        response = requests.get(WEATHER_URL, params=params, timeout=10)
+        data = response.json()
+        
+        if response.status_code == 200:
+            temp = data["main"]["temp"]
+            desc = data["weather"][0]["description"]
+            update.message.reply_text(f"Vremea în {city}: {temp}°C, {desc}")
         else:
-            await update.message.reply_text("Nu găsesc orașul.")
-    except:
-        await update.message.reply_text("Eroare la obținerea vremii.")
-
-async def gpt_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != GROUP_ID:
-        return
-    if not OPENAI_API_KEY:
-        await update.message.reply_text("GPT nu e configurat.")
-        return
-    if not context.args:
-        await update.message.reply_text("Scrie ceva după /gpt.")
-        return
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        resp = client.chat.completions.create(model=GPT_MODEL, messages=[{"role": "user", "content": " ".join(context.args)}], max_tokens=200)
-        await update.message.reply_text(resp.choices[0].message.content)
+            update.message.reply_text(f"Oraș negăsit: {city}")
     except Exception as e:
-        await update.message.reply_text(f"Eroare GPT: {str(e)[:100]}")
+        logger.error(f"Weather API error: {e}")
+        update.message.reply_text("Eroare la obținerea vremii.")
 
-async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def summary(update: Update, context: CallbackContext):
     if update.effective_chat.id != GROUP_ID:
         return
-    now = datetime.utcnow()
-    msgs = []
-    if context.args:
-        try:
-            val = int(context.args[0])
-            if val <= 24:
-                since = now - timedelta(hours=val)
-                msgs = [m for m in MESSAGES if m["time"] >= since]
-            else:
-                msgs = MESSAGES[-val:]
-        except:
-            pass
+    
+    if not MESSAGES:
+        update.message.reply_text("Niciun mesaj înregistrat încă.")
+        return
+    
+    if not context.args:
+        limit = 20
     else:
-        since = now - timedelta(hours=12)
-        msgs = [m for m in MESSAGES if m["time"] >= since]
+        try:
+            limit = int(context.args[0])
+        except:
+            cutoff = datetime.now() - timedelta(hours=int(context.args[0].replace("ore", "")))
+            recent = [m for m in MESSAGES if m["time"] > cutoff]
+            limit = len(recent)
     
-    if not msgs:
-        await update.message.reply_text("Nu am ce rezuma.")
-        return
-    
+    recent_msgs = MESSAGES[-limit:]
     words = []
-    for m in msgs:
-        words += clean_text(m["text"]).split()
+    for msg in recent_msgs:
+        words.extend(clean_text(msg["text"]).split())
+    
     common = Counter(words).most_common(5)
-    response = "Subiecte frecvente:\n" + "\n".join([f"- {w}" for w, c in common if len(w) > 3])
-    await update.message.reply_text(response)
+    top_words = ", ".join([f"{w} ({c})" for w, c in common])
+    
+    update.message.reply_text(f"Sumar {limit} mesaje:\nCuvinte frecvente: {top_words}")
 
-async def mood(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def mood(update: Update, context: CallbackContext):
     if update.effective_chat.id != GROUP_ID:
         return
-    texts = " ".join([m["text"] for m in MESSAGES[-100:]]).lower()
-    score = sum(-texts.count(n) for n in ["nu", "prost", "nasol", "fail", "stupid"]) + sum(texts.count(p) for p in ["ok", "bine", "perfect", "super"])
-    mood_str = "Relaxat" if score > 2 else ("Tensionat" if score < -2 else "Neutru")
-    await update.message.reply_text(f"Ton general: {mood_str}.")
-
-async def listener(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or update.effective_chat.id != GROUP_ID:
+    
+    if not MESSAGES:
+        update.message.reply_text("Niciun mesaj pentru analiză.")
         return
     
-    text = update.message.text or ""
-    MESSAGES.append({"text": text, "time": datetime.utcnow()})
+    recent = " ".join([m["text"] for m in MESSAGES[-10:]])
+    positive = len(re.findall(r"\b(bun|super|wow|tare|cool)\b", recent, re.I))
+    negative = len(re.findall(r"\b(rău|prost|nasol|urat)\b", recent, re.I))
+    
+    if positive > negative:
+        update.message.reply_text("Mood: Pozitiv 😊")
+    elif negative > positive:
+        update.message.reply_text("Mood: Negativ 😞")
+    else:
+        update.message.reply_text("Mood: Neutru 😐")
+
+def ping(update: Update, context: CallbackContext):
+    if update.effective_chat.id != GROUP_ID:
+        return
+    update.message.reply_text("Pong! 🏓")
+
+def gpt(update: Update, context: CallbackContext):
+    if update.effective_chat.id != GROUP_ID:
+        return
+    
+    if not OPENAI_API_KEY:
+        update.message.reply_text("OpenAI API key nu este configurat.")
+        return
+    
+    if not context.args:
+        update.message.reply_text("Folosire: /gpt <întrebare>")
+        return
+    
+    question = " ".join(context.args)
+    
+    try:
+        headers = {
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": GPT_MODEL,
+            "messages": [{"role": "user", "content": question}],
+            "max_tokens": 500
+        }
+        
+        response = requests.post("https://api.openai.com/v1/chat/completions", 
+                               headers=headers, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            answer = response.json()["choices"][0]["message"]["content"]
+            update.message.reply_text(answer)
+        else:
+            logger.error(f"OpenAI API error: {response.status_code} - {response.text}")
+            update.message.reply_text(f"Eroare GPT: {response.status_code}")
+    except Exception as e:
+        logger.error(f"GPT request failed: {e}")
+        update.message.reply_text("Eroare la conectarea cu GPT.")
+
+# Message handler
+def handle_message(update: Update, context: CallbackContext):
+    if update.effective_chat.id != GROUP_ID:
+        return
+    
+    msg = update.message
+    if not msg or not msg.text:
+        return
+    
+    # Store message
+    MESSAGES.append({
+        "text": msg.text,
+        "user": msg.from_user.first_name,
+        "time": datetime.now()
+    })
+    
+    # Keep only last 1000 messages
     if len(MESSAGES) > 1000:
         MESSAGES.pop(0)
     
-    for pattern in JOKE_TRIGGERS:
-        if re.search(pattern, text.lower()):
-            lang = detect_lang(text)
-            jokes = JOKES_RO if lang == "ro" else JOKES_EN
-            await update.message.reply_text(jokes[int(time.time()) % len(jokes)])
+    # Joke trigger
+    text_lower = msg.text.lower()
+    for trigger in JOKE_TRIGGERS:
+        if re.search(trigger, text_lower):
+            lang = detect_lang(msg.text)
+            joke = JOKES_RO[hash(msg.text) % len(JOKES_RO)] if lang == "ro" else JOKES_EN[hash(msg.text) % len(JOKES_EN)]
+            msg.reply_text(joke)
             break
 
+# Main
 def main():
-    # Build application
-    app = Application.builder().token(BOT_TOKEN).build()
+    updater = Updater(token=BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
     
-    # Add handlers
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("ping", ping))
-    app.add_handler(CommandHandler("weather", weather))
-    app.add_handler(CommandHandler("gpt", gpt_cmd))
-    app.add_handler(CommandHandler("summary", summary))
-    app.add_handler(CommandHandler("mood", mood))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, listener))
+    # Register handlers
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("weather", weather))
+    dp.add_handler(CommandHandler("summary", summary))
+    dp.add_handler(CommandHandler("mood", mood))
+    dp.add_handler(CommandHandler("ping", ping))
+    dp.add_handler(CommandHandler("gpt", gpt))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
     
-    # Run
+    # Start bot
     logger.info("Bot starting...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     main()
