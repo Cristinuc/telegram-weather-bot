@@ -62,13 +62,11 @@ def get_chat_timezone(chat_id: int) -> ZoneInfo:
 
 def parse_date_time(date_str: str, time_str: str, tz: ZoneInfo) -> datetime:
     try:
-        if "-" in date_str:
-            dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
-        else:
+        if "." in date_str:
             dt = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
-    except ValueError:
-        raise ValueError(
-            "Format dată/oră invalid. Folosește de ex: 2025-12-20 10:00 sau 20.12.2025 10:00."
+        else:
+            dt = datetime.strptime(f"{date_str} {time_str}", "%d-%m-%Y %H:%M")    except ValueError:
+            "Format dată/oră invalid. Folosește: DD-MM-YYYY HH:MM sau DD.MM.YYYY HH:MM, ex: 20-12-2025 10:00"            "Format dată/oră invalid. Folosește de ex: 2025-12-20 10:00 sau 20.12.2025 10:00."
         )
     return dt.replace(tzinfo=tz)
 
@@ -370,10 +368,9 @@ async def reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/reminder @user \"mesaj\" 2025-12-20 10:00\n"
             "/reminder grup \"mesaj\" zilnic 10:00\n"
             "/reminder @user \"mesaj\" în 2 ore"
-        )
-        return
-
-    rest = args[1].strip()
+            "/reminder grup \"mesaj\" 20-12-2025 10:00\n"
+            "/reminder @user \"mesaj\" 20-12-2025 10:00\n"
+            "/reminder grup \"mesaj\" zilnic 10:00\n"    rest = args[1].strip()
 
     if rest.startswith("grup"):
         scope = "group"
@@ -521,8 +518,7 @@ async def build_reminder_object(
     date_str, time_str = tail_parts
     dt_local = parse_date_time(date_str, time_str, tz)
     if dt_local <= datetime.now(tz):
-        raise ValueError("Data/ora este în trecut.")
-    run_at_utc = dt_local.astimezone(ZoneInfo("UTC"))
+        raise ValueError("Folosește: <data> <ora>, ex: 20-12-2025 10:00")    run_at_utc = dt_local.astimezone(ZoneInfo("UTC"))
     return {
         "chat_id": chat_id,
         "scope": scope,
