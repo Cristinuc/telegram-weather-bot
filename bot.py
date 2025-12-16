@@ -65,11 +65,10 @@ def parse_date_time(date_str: str, time_str: str, tz: ZoneInfo) -> datetime:
         if "." in date_str:
             dt = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
         else:
-            dt = datetime.strptime(f"{date_str} {time_str}", "%d-%m-%Y %H:%M")    except ValueError:
-        raise ValueError(
-            "Format dată/oră invalid. Folosește: DD-MM-YYYY HH:MM sau DD.MM.YYYY HH:MM, ex: 20-12-2025 10:00"
-        )        )
-    return dt.replace(tzinfo=tz)
+            dt = datetime.strptime(f"{date_str} {time_str}", "%d-%m-%Y %H:%M")
+            raise ValueError(            "Format dată/oră invalid. Folosește: DD-MM-YYYY HH:MM sau DD.MM.YYYY HH:MM, ex: 20-12-2025 10:00"
+            )
+            return dt.replace(tzinfo=tz)
 
 
 def parse_time_only(time_str: str, tz: ZoneInfo) -> time:
@@ -519,7 +518,8 @@ async def build_reminder_object(
     date_str, time_str = tail_parts
     dt_local = parse_date_time(date_str, time_str, tz)
     if dt_local <= datetime.now(tz):
-        raise ValueError("Folosește: <data> <ora>, ex: 20-12-2025 10:00")    run_at_utc = dt_local.astimezone(ZoneInfo("UTC"))
+        raise ValueError("Folosește: <data> <ora>, ex: 20-12-2025 10:00")
+        run_at_utc = dt_local.astimezone(ZoneInfo("UTC"))
     return {
         "chat_id": chat_id,
         "scope": scope,
