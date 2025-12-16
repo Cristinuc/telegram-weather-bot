@@ -547,7 +547,11 @@ def main():
 
     application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
-    load_and_schedule_all(application)
+        async def post_init(application):
+        load_and_schedule_all(application)
+
+    application.post_init = post_init
+
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("meteo", meteo))
