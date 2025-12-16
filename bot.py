@@ -66,10 +66,10 @@ def parse_date_time(date_str: str, time_str: str, tz: ZoneInfo) -> datetime:
             dt = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
         else:
             dt = datetime.strptime(f"{date_str} {time_str}", "%d-%m-%Y %H:%M")
-            raise ValueError(            "Format dată/oră invalid. Folosește: DD-MM-YYYY HH:MM sau DD.MM.YYYY HH:MM, ex: 20-12-2025 10:00"
-            )
-            return dt.replace(tzinfo=tz)
-
+    except ValueError:
+        raise ValueError(
+            "Format dată/oră invalid. Folosește: DD-MM-YYYY HH:MM sau DD.MM.YYYY HH:MM, ex: 20-12-2025 10:00"
+        )
 
 def parse_time_only(time_str: str, tz: ZoneInfo) -> time:
     try:
