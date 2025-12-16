@@ -370,8 +370,11 @@ async def reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/reminder @user \"mesaj\" în 2 ore"
             "/reminder grup \"mesaj\" 20-12-2025 10:00\n"
             "/reminder @user \"mesaj\" 20-12-2025 10:00\n"
-            "/reminder grup \"mesaj\" zilnic 10:00\n"    rest = args[1].strip()
+            "/reminder grup \"mesaj\" zilnic 10:00\n"
+                    )
+                return
 
+        rest = args[1].strip()
     if rest.startswith("grup"):
         scope = "group"
         rest = rest[len("grup"):].strip()
